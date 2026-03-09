@@ -4,15 +4,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Advertisement
+from app.models import Advertisement, UserGroup
 from app.schemas import AdvertisementCreate, AdvertisementUpdate, AdvertisementResponse
+from app.auth import get_current_user, require_auth
 
 router = APIRouter(prefix="/advertisement", tags=["advertisements"])
 
 
 @router.post("", response_model=AdvertisementResponse, status_code=201)
-def create_advertisement(data: AdvertisementCreate, db: Session = Depends(get_db)):
-    ad = Advertisement(**data.model_dump())
+def create_advertisement(
+    data: AdvertisementCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_auth),
+):
+    ad = Advertisement(
+        **data.model_dump(),
+        author=current_user.username,
+        user_id=current_user.id,
+    )
     db.add(ad)
     db.commit()
     db.refresh(ad)
@@ -32,10 +41,15 @@ def update_advertisement(
     advertisement_id: int,
     data: AdvertisementUpdate,
     db: Session = Depends(get_db),
+    current_user=Depends(require_auth),
 ):
     ad = db.get(Advertisement, advertisement_id)
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    if current_user.group != UserGroup.ADMIN and current_user.id != ad.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(ad, field, value)
     db.commit()
@@ -44,10 +58,18 @@ def update_advertisement(
 
 
 @router.delete("/{advertisement_id}", status_code=204)
-def delete_advertisement(advertisement_id: int, db: Session = Depends(get_db)):
+def delete_advertisement(
+    advertisement_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_auth),
+):
     ad = db.get(Advertisement, advertisement_id)
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    if current_user.group != UserGroup.ADMIN and current_user.id != ad.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     db.delete(ad)
     db.commit()
 
